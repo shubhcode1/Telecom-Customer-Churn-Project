@@ -1,37 +1,36 @@
-# 1. Use the official lightweight Python base image
+# 1. Lightweight Python base image
 FROM python:3.11-slim
 
-# 2. Set working directory inside the container
+# 2. Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# 3. Set working directory
 WORKDIR /app
 
-# 3. Copy only dependency file first (for Docker caching)
-COPY requirements.txt .
+# 4. Copy dependency files first for Docker layer caching
+COPY pyproject.toml uv.lock ./
 
-# 4. Install Python dependencies (add curl if you use MLflow local tracking URI)
-RUN pip install --upgrade pip \
-    && pip install -r requirements.txt \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+# 5. Create virtual environment and install locked dependencies
+RUN uv sync --frozen --no-dev
 
-# 5. Copy the entire project into the image
+# 6. Copy the entire project
 COPY . .
 
-# Explicitly copy model (in case .dockerignore excluded mlruns)
-# NOTE: destination changed to /app/src/serving/model to match inference.py's path
+# 7. Explicitly copy model
 COPY src/serving/model /app/src/serving/model
 
-# Copy MLflow run (artifacts + metadata) to the flat /app/model convenience path
+# 8. Copy MLflow model artifacts
 COPY src/serving/model/3b1a41221fc44548aed629fa42b762e0/artifacts/model /app/model
 COPY src/serving/model/3b1a41221fc44548aed629fa42b762e0/artifacts/feature_columns.txt /app/model/feature_columns.txt
 COPY src/serving/model/3b1a41221fc44548aed629fa42b762e0/artifacts/preprocessing.pkl /app/model/preprocessing.pkl
 
-# make "serving" and "app" importable without the "src." prefix
-# ensures logs are shown in real-time (no buffering).
-# lets you import modules using from app... instead of from src.app....
-ENV PYTHONUNBUFFERED=1 \ 
-    PYTHONPATH=/app/src
+# 9. Environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src \
+    PATH="/app/.venv/bin:$PATH"
 
-# 6. Expose FastAPI port
+# 10. FastAPI port
 EXPOSE 8000
 
-# 7. Run the FastAPI app using uvicorn (change path if needed)
-CMD ["python", "-m", "uvicorn", "src.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# 11. Start FastAPI
+CMD ["uvicorn", "src.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
